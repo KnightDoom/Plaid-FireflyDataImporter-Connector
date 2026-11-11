@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: plaid-firefly-sync
+  namespace: default
+data:
+  MODE: direct # or importer
+  PLAID_ENV: production # use sandbox for tests
+  FIREFLY_URL: http://firefly-iii.default.svc.cluster.local:8080 # CHANGE: in-cluster Service name/namespace
+  IMPORTER_URL: http://firefly-data-importer.default.svc.cluster.local:8080 # CHANGE if using importer mode
+  STATE_DB: /config/state.sqlite
+  DRY_RUN: "true" # FIRST ROLLOUT: review logs; then set to "false"
+  LOG_LEVEL: INFO
+  # IMPORT_START_DATE: "2026-11-01" # optional initial-backfill cutoff (YYYY-MM-DD)

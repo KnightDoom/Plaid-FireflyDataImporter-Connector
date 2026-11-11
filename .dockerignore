@@ -1,0 +1,15 @@
+.git
+.github
+.dockerignore
+.env
+.env.*
+__pycache__
+*.py[cod]
+*.sqlite
+*.db
+*.sops.yaml
+config
+docs
+tests
+compose.yaml
+README.md

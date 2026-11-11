@@ -1,0 +1,56 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: plaid-firefly-sync
+  namespace: default
+spec:
+  schedule: "0 */6 * * *" # every 6 hours, cluster CronJob controller timezone unless timeZone set
+  timeZone: America/Toronto
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 1800
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      ttlSecondsAfterFinished: 172800
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: sync
+              image: ghcr.io/<owner>/<repository>:sha-REPLACE_WITH_COMMIT_SHA # Replace after GHCR build; pin by digest later
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - configMapRef:
+                    name: plaid-firefly-sync
+                - secretRef:
+                    name: plaid-firefly-sync
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              volumeMounts:
+                - name: state
+                  mountPath: /config
+          volumes:
+            - name: state
+              persistentVolumeClaim:
+                claimName: plaid-firefly-sync

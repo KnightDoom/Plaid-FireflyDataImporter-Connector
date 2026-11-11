@@ -1,0 +1,21 @@
+# Register this Flux Kustomization in your namespace's existing aggregator.
+# Replace sops-age with the real age decryption Secret name in flux-system.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: plaid-firefly-sync
+  namespace: flux-system
+spec:
+  interval: 30m
+  retryInterval: 2m
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./kubernetes/apps/default/plaid-firefly-sync/app
+  targetNamespace: default
+  prune: true
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age

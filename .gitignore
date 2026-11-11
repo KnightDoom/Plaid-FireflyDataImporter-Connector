@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+.vscode/
+__pycache__/
+*.py[cod]
+*.sqlite
+*.db
+config/
+*.sops.yaml
