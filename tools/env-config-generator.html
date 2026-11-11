@@ -101,9 +101,9 @@
     .state-output { min-height: 220px; }
     .button-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
     .help-callout { margin-top: 16px; padding: 10px 12px; border-left: 4px solid var(--accent); background: #eaf4fc; color: var(--muted); }
-    details.section > summary { cursor: pointer; list-style: none; }
+    details.section > summary { cursor: pointer; list-style: none; justify-content: flex-start; }
     details.section > summary::-webkit-details-marker { display: none; }
-    details.section > summary::before { content: "▸"; display: inline-block; margin-right: 8px; color: var(--accent); }
+    details.section > summary::before { content: "▸"; display: inline-block; color: var(--accent); }
     details.section[open] > summary::before { content: "▾"; }
     .diagnostics-body { margin-top: 16px; }
     .footer-note { margin-top: 20px; font-size: .9rem; }
