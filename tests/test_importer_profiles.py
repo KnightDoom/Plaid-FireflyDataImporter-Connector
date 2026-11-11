@@ -1,6 +1,5 @@
 import csv
 import io
-import os
 import sys
 import tempfile
 import unittest
@@ -8,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
-from plaid_firefly import (Importer, Store, SyncError, check_importer_profile,
+from plaid_firefly import (CsvExporter, Store, SyncError, check_importer_profile,
                           render_importer_csv, process_item)
 
 
@@ -53,20 +52,6 @@ def transaction(amount, txid='x1'):
             '_external_id': 'plaid:bank:' + txid, '_currency': 'CAD', 'pending': False}
 
 
-class Response:
-    ok = True
-    status_code = 200
-
-
-class UploadSession:
-    def __init__(self):
-        self.calls = []
-
-    def post(self, *args, **kwargs):
-        self.calls.append((args, kwargs))
-        return Response()
-
-
 class ProfileTests(unittest.TestCase):
     def test_chequing_split_columns_and_locale(self):
         csv_bytes = render_importer_csv([transaction('1234.50'), transaction('-42.10', 'x2')], {}, CHEQUING)
@@ -82,23 +67,45 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(rows[0], ['Visa Account', '11/08/2026', 'Example Shop', '19.99', 'plaid:bank:x1'])
         self.assertEqual(rows[1][-2], '-30.22')
 
-    def test_upload_uses_account_selected_profile_and_json(self):
-        session = UploadSession()
-        importer = Importer(session, 'http://importer', 'not-a-real-secret', 'test-token',
-                            {'bank-chequing': CHEQUING, 'visa-card': CARD})
-        importer.send('plaid-card', [transaction('22.95')], {'importer_profile': 'visa-card', 'name': 'Visa'})
-        self.assertEqual(len(session.calls), 1)
-        args, kwargs = session.calls[0]
-        self.assertEqual(kwargs['files']['json'][1], b'{"test_importer": "credit-card"}')
-        self.assertIn(b'11/08/2026', kwargs['files']['importable'][1])
-        self.assertNotIn(b'Posted', kwargs['files']['importable'][1])
+    def test_writes_csv_to_bank_destination(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            exporter = CsvExporter({'plaid-card': tmp}, {'visa-card': CARD})
+            account = {'importer_profile': 'visa-card', 'name': 'Visa'}
+            output = exporter.write('plaid-card', 'checking', [transaction('22.95')], account, 'cursor-1')
+            self.assertEqual(output.parent, Path(tmp))
+            self.assertIn(b'11/08/2026', output.read_bytes())
+            self.assertNotIn(b'Posted', output.read_bytes())
+            config = output.with_suffix('.json')
+            self.assertEqual(config.read_text(), '{"test_importer": "credit-card"}')
+            same_output = exporter.write('plaid-card', 'checking', [transaction('22.95')], account, 'cursor-1')
+            self.assertEqual(output, same_output)
+            self.assertEqual(len(list(Path(tmp).glob('*.csv'))), 1)
+            self.assertEqual(len(list(Path(tmp).glob('*.json'))), 1)
 
-    def test_unknown_profile_does_not_upload(self):
-        session = UploadSession()
-        importer = Importer(session, 'http://importer', 'secret', 'token', {'bank-chequing': CHEQUING})
+    def test_unknown_profile_does_not_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            exporter = CsvExporter({'bank-chequing': tmp}, {'bank-chequing': CHEQUING})
+            with self.assertRaises(SyncError):
+                exporter.write('bank-chequing', 'id', [transaction('1.00')],
+                               {'importer_profile': 'does-not-exist'}, 'cursor-1')
+            self.assertFalse(list(Path(tmp).glob('*.csv')))
+
+    def test_destination_is_required_for_each_bank(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            exporter = CsvExporter({'other-bank': tmp}, {'bank-chequing': CHEQUING})
+            with self.assertRaises(SyncError):
+                exporter.write('bank-chequing', 'id', [transaction('1.00')],
+                               {'importer_profile': 'bank-chequing'}, 'cursor-1')
+
+    def test_importer_json_is_required(self):
+        profile = dict(CARD)
+        profile.pop('importer_config')
         with self.assertRaises(SyncError):
-            importer.send('id', [transaction('1.00')], {'importer_profile': 'does-not-exist'})
-        self.assertFalse(session.calls)
+            check_importer_profile(profile)
+
+    def test_invalid_relative_destination(self):
+        with self.assertRaises(SyncError):
+            CsvExporter({'bank-chequing': 'relative/path'}, {'bank-chequing': CHEQUING})
 
     def test_external_id_required(self):
         invalid = {'importer_config': {'x': 'y'}, 'csv': {'columns': [{'field': 'date', 'header': 'Date'}]}}
@@ -112,16 +119,34 @@ class ProfileTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             with Store(str(Path(tmp) / 's.db')) as store:
-                session = UploadSession()
-                importer = Importer(session, 'http://importer', 'secret', 'token', {'bank-chequing': CHEQUING})
+                exporter = CsvExporter({'bank': tmp}, {'bank-chequing': CHEQUING})
                 item = {'key': 'bank', 'access_token': 'token',
                         'accounts': {'checking': {'currency': 'CAD', 'firefly_account_id': 4,
                                                   'importer_profile': 'not-configured'}}}
                 with patch('plaid_firefly.fetch_updates', return_value=([transaction('22.01')], [], [], 'newcursor')):
                     with self.assertRaises(SyncError):
-                        process_item(item, store, None, NoMatches(), importer, 'client', 'secret', 'host', False)
+                        process_item(item, store, None, NoMatches(), exporter, 'client', 'secret', 'host', False)
                 self.assertIsNone(store.cursor('bank'))
-                self.assertFalse(session.calls)
+                self.assertFalse(list(Path(tmp).glob('*.csv')))
+
+    def test_export_marks_rows_and_advances_cursor_after_write(self):
+        class NoMatches:
+            def find(self, ext):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with Store(str(Path(tmp) / 's.db')) as store:
+                exporter = CsvExporter({'bank': tmp}, {'bank-chequing': CHEQUING})
+                item = {'key': 'bank', 'access_token': 'token',
+                        'accounts': {'checking': {'currency': 'CAD', 'firefly_account_id': 4,
+                                                  'importer_profile': 'bank-chequing'}}}
+                with patch('plaid_firefly.fetch_updates',
+                           return_value=([transaction('22.01')], [], [], 'newcursor')):
+                    process_item(item, store, None, NoMatches(), exporter,
+                                 'client', 'secret', 'host', False)
+                self.assertEqual(store.cursor('bank'), 'newcursor')
+                self.assertEqual(store.seen('plaid:bank:x1')[1], 'exported')
+                self.assertEqual(len(list(Path(tmp).glob('*.csv'))), 1)
 
     def test_encoding_excel_bom(self):
         bom = dict(CARD)

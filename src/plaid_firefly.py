@@ -12,11 +12,12 @@ import io
 import json
 import logging
 import os
+import re
 import sqlite3
 import sys
-import time
 from decimal import Decimal
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -210,8 +211,10 @@ CSV_FIELDS = {
 
 
 def check_importer_profile(profile: dict[str, Any]) -> None:
-    """Fail closed on invalid/incomplete bank-specific importer settings."""
-    if not isinstance(profile, dict) or not isinstance(profile.get("importer_config"), dict) or not profile["importer_config"]:
+    """Fail closed on invalid/incomplete bank-specific CSV settings."""
+    if (not isinstance(profile, dict) or
+            not isinstance(profile.get("importer_config"), dict) or
+            not profile["importer_config"]):
         raise SyncError("Each importer profile needs a full exported importer_config JSON")
     config = profile.get("csv")
     if not isinstance(config, dict):
@@ -317,13 +320,22 @@ def render_importer_csv(rows: list[dict[str, Any]], account: dict[str, Any],
         raise SyncError("CSV contains data not supported by the selected bank encoding") from exc
 
 
-class Importer:
-    def __init__(self, session: requests.Session, url: str, auto_secret: str, token: str,
-                 profiles: dict[str, dict]):
-        self.session = session
-        self.url = url.rstrip("/")
-        self.auto_secret = auto_secret
-        self.token = token
+def path_component(value: str) -> str:
+    component = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value)).strip("._")
+    return component or "unknown"
+
+
+class CsvExporter:
+    def __init__(self, destinations: dict[str, str], profiles: dict[str, dict]):
+        if not isinstance(destinations, dict) or not destinations:
+            raise SyncError("IMPORTER_DESTINATIONS_JSON must be a nonempty bank-to-directory mapping")
+        self.destinations: dict[str, Path] = {}
+        for bank_key, destination in destinations.items():
+            if not isinstance(bank_key, str) or not bank_key:
+                raise SyncError("CSV destination bank keys must be nonempty strings")
+            if not isinstance(destination, str) or not destination.strip() or not os.path.isabs(destination):
+                raise SyncError(f"CSV destination for bank {bank_key!r} must be an absolute path")
+            self.destinations[bank_key] = Path(destination)
         if not isinstance(profiles, dict) or not profiles:
             raise SyncError("IMPORTER_PROFILES_JSON must be a nonempty profile mapping")
         for profile_name, profile in profiles.items():
@@ -333,32 +345,48 @@ class Importer:
                 raise SyncError(f"Invalid importer profile {profile_name!r}: {exc}") from exc
         self.profiles = profiles
 
-    def send(self, account_id: str, rows: list[dict[str, Any]], account: dict[str, Any]) -> None:
-        # The exact account mapping selects the profile; no bank-wide inference.
+    def write(self, bank_key: str, account_id: str, rows: list[dict[str, Any]],
+              account: dict[str, Any], batch_cursor: str) -> Path:
+        destination = self.destinations.get(bank_key)
+        if destination is None:
+            raise SyncError(f"No CSV destination configured for bank {bank_key!r}")
         profile_name = account.get("importer_profile")
         if not profile_name or profile_name not in self.profiles:
-            raise SyncError("A mapped Plaid account lacks a valid importer_profile; nothing uploaded")
+            raise SyncError("A mapped Plaid account lacks a valid importer_profile; nothing exported")
         profile = self.profiles[profile_name]
         csv_bytes = render_importer_csv(rows, account, profile)
-        files = {
-            "importable": (f"plaid-{profile_name}.csv", csv_bytes, "text/csv"),
-            "json": (f"plaid-{profile_name}.json", json.dumps(profile["importer_config"]).encode("utf-8"),
-                     "application/json"),
-        }
+        cursor_hash = hashlib.sha256(batch_cursor.encode("utf-8")).hexdigest()[:16]
+        file_name = (f"plaid-{path_component(bank_key)}-{path_component(account_id)}-"
+                     f"{path_component(profile_name)}-{cursor_hash}.csv")
+        output_path = destination / file_name
+        config_path = output_path.with_suffix(".json")
+        temporary_csv = destination / f".{file_name}.{os.getpid()}.tmp"
+        temporary_config = destination / f".{config_path.name}.{os.getpid()}.tmp"
         try:
-            response = self.session.post(f"{self.url}/autoupload",
-                                         params={"secret": self.auto_secret},
-                                         headers={"Accept": "application/json", "Authorization": f"Bearer {self.token}"},
-                                         files=files, timeout=300)
-        except requests.RequestException as exc:
-            raise SyncError("Data Importer upload outcome is uncertain") from exc
-        if not response.ok:
-            raise SyncError(f"Data Importer upload failed with HTTP {response.status_code}")
-        # HTTP success is not per-row confirmation. Caller verifies every external ID in Firefly.
+            destination.mkdir(parents=True, exist_ok=True)
+            temporary_config.write_text(
+                json.dumps(profile["importer_config"], sort_keys=True),
+                encoding="utf-8",
+            )
+            temporary_csv.write_bytes(csv_bytes)
+            # Publish the config first, then the CSV. A directory watcher will
+            # never see a CSV without its matching importer configuration.
+            os.replace(temporary_config, config_path)
+            os.replace(temporary_csv, output_path)
+        except OSError as exc:
+            try:
+                temporary_config.unlink(missing_ok=True)
+                temporary_csv.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise SyncError(f"Could not write CSV output for bank {bank_key!r}") from exc
+        LOG.info("Wrote %d transactions for bank %s to %s and %s",
+                 len(rows), bank_key, output_path, config_path)
+        return output_path
 
 
 def process_item(item: dict[str, Any], store: Store, session: requests.Session,
-                 firefly: Firefly, importer: Importer | None, client_id: str,
+                 firefly: Firefly, exporter: CsvExporter | None, client_id: str,
                  secret: str, host: str, dry_run: bool) -> tuple[int, int]:
     item_key = item["key"]
     if not item_key.replace("-", "").replace("_", "").isalnum():
@@ -397,7 +425,7 @@ def process_item(item: dict[str, Any], store: Store, session: requests.Session,
         fp = fingerprint(tx)
         known = store.seen(ext_id)
         if known:
-            if known[0] != fp and known[1] in ("imported", "review_modified", "review_removed"):
+            if known[0] != fp and known[1] in ("imported", "exported", "review_modified", "review_removed"):
                 LOG.warning("An already-imported transaction changed; manual reconciliation required")
                 review += 1
                 if not dry_run:
@@ -418,7 +446,7 @@ def process_item(item: dict[str, Any], store: Store, session: requests.Session,
             LOG.info("DRY RUN: would import %d transactions into mapped account", len(txs))
             imported += len(txs)
             continue
-        if importer is None:
+        if exporter is None:
             for tx in txs:
                 ext_id = tx["_external_id"]
                 # Check again when doing writes to survive partial previous attempts.
@@ -427,17 +455,9 @@ def process_item(item: dict[str, Any], store: Store, session: requests.Session,
                 store.mark(ext_id, fingerprint(tx), "imported", group)
                 imported += 1
         else:
-            importer.send(account_id, txs, accounts[account_id])
+            exporter.write(item_key, account_id, txs, accounts[account_id], new_cursor)
             for tx in txs:
-                group = None
-                for attempt in range(5):
-                    group = firefly.find(tx["_external_id"])
-                    if group:
-                        break
-                    time.sleep(2 ** attempt)
-                if not group:
-                    raise SyncError("Data Importer did not verify all rows; cursor preserved for retry")
-                store.mark(tx["_external_id"], fingerprint(tx), "imported", group)
+                store.mark(tx["_external_id"], fingerprint(tx), "exported")
                 imported += 1
 
     for r in removed:
@@ -474,14 +494,13 @@ def main() -> int:
         raise SyncError("Item keys must be unique")
     with requests.Session() as session:
         firefly = Firefly(session, required("FIREFLY_URL"), required("FIREFLY_TOKEN"))
-        importer = None
+        exporter = None
         if mode == "importer":
-            importer = Importer(session, required("IMPORTER_URL"),
-                                required("IMPORTER_AUTO_IMPORT_SECRET"), required("FIREFLY_TOKEN"),
-                                get_json_env("IMPORTER_PROFILES_JSON", {}))
+            exporter = CsvExporter(get_json_env("IMPORTER_DESTINATIONS_JSON", {}),
+                                   get_json_env("IMPORTER_PROFILES_JSON", {}))
         store = Store(os.getenv("STATE_DB", "/config/state.sqlite"))
         for item in items:
-            process_item(item, store, session, firefly, importer,
+            process_item(item, store, session, firefly, exporter,
                          required("PLAID_CLIENT_ID"), required("PLAID_SECRET"),
                          PLAID_HOSTS[plaid_env], dry_run)
     return 0

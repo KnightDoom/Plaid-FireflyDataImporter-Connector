@@ -15,8 +15,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --requirement requirements.txt \
     && addgroup --system --gid 10001 app \
     && adduser --system --uid 10001 --gid 10001 --no-create-home app \
-    && mkdir --parents /config /tmp \
-    && chown --recursive 10001:10001 /config /tmp
+    && mkdir --parents /config /exports /tmp \
+    && chown --recursive 10001:10001 /config /exports /tmp
 
 COPY src/plaid_firefly.py /app/plaid_firefly.py
 

@@ -5,8 +5,8 @@ posted transactions from Plaid and imports them into Firefly III. It supports
 two destinations:
 
 - `direct` (default): create transactions through the Firefly III API.
-- `importer`: render bank/account-specific CSV profiles and upload them to
-  Firefly III Data Importer through `/autoupload`.
+- `importer`: render bank/account-specific CSV profiles and write them to
+  bank-specific directories for Firefly III Data Importer to consume.
 
 Kubernetes and Flux manifests are intentionally not part of the runnable
 repository yet. The future deployment reference is preserved under
@@ -22,6 +22,8 @@ repository yet. The future deployment reference is preserved under
   the sandbox results.
 - Pending transactions are skipped, and modified/removed imported transactions
   are flagged for manual reconciliation.
+- Generated CSV files contain transaction data and should be treated as
+  sensitive; share the output directory only with the intended importer.
 - Plaid access tokens, mappings, importer profiles, and Firefly credentials
   belong in runtime environment variables or a secret manager, never in Git.
 
@@ -43,10 +45,11 @@ docker compose build
 docker compose run --rm plaid-firefly-sync
 ```
 
-The Compose service uses a named volume mounted at `/config`, so normal
-rootless Docker users do not need to prepare a host directory or grant root
-permissions. The volume contains only the SQLite sync state. The container is
-read-only apart from `/config` and the 64 MiB `/tmp` tmpfs.
+The Compose service uses named volumes mounted at `/config` and `/exports`, so
+normal rootless Docker users do not need to prepare host directories or grant
+root permissions. The volumes contain SQLite sync state and generated CSV
+files. The container is read-only apart from those volumes and the 64 MiB
+`/tmp` tmpfs.
 
 To run it weekly, invoke the one-shot service from the host's scheduler:
 
@@ -54,9 +57,10 @@ To run it weekly, invoke the one-shot service from the host's scheduler:
 0 3 * * 0 cd /path/to/repository && docker compose run --rm plaid-firefly-sync
 ```
 
-For a host-local bind mount instead of the named volume, replace the volume
-with `./config:/config` and ensure that the host directory is writable by UID
-`10001`.
+For host-local bind mounts instead of the named volumes, replace them with
+`./config:/config` and `./exports:/exports`, then ensure both host directories
+are writable by UID `10001`. The `./exports` directory can be mounted into the
+Firefly III Data Importer container as its import source.
 
 ## Configuration
 
@@ -66,14 +70,34 @@ contains one or more existing Plaid Item access tokens and explicit mappings
 from Plaid account IDs to Firefly account IDs. Use `PLAID_ENV=sandbox` while
 testing.
 
-Importer mode additionally requires `IMPORTER_URL`,
-`IMPORTER_AUTO_IMPORT_SECRET`, and a complete `IMPORTER_PROFILES_JSON` mapping.
-Each profile must contain the exported Data Importer JSON and exactly one CSV
-`external_id` column. Profiles can differ for every bank and account type.
+Importer mode additionally requires `IMPORTER_DESTINATIONS_JSON` and a
+complete `IMPORTER_PROFILES_JSON` mapping. The destination mapping uses the
+Plaid Item `key` as the bank key and maps it to an absolute writable directory
+inside the container. For example:
+
+```text
+IMPORTER_DESTINATIONS_JSON={"bank-one":"/exports/bank-one"}
+```
+
+Each mapped account selects a CSV profile through `importer_profile`. Profiles
+must contain the exported Data Importer `importer_config` JSON and exactly one
+CSV `external_id` column; they can differ for every bank and account type. Each
+sync batch is written as a matching deterministic CSV/JSON pair under the
+configured bank directory; no `/autoupload` request is made. The JSON sidecar
+is required by Data Importer's local-directory importer unless a shared
+`_fallback.json` is configured there.
+For automatic ingestion, mount the same host directory into this container and
+the Firefly III Data Importer container.
 
 See [`.env.example`](.env.example) for a non-secret template. Do not commit
 `.env`, access tokens, personal access tokens, importer secrets, or raw account
 mappings.
+
+To generate the JSON values interactively without running a webserver, open
+[`tools/env-config-generator.html`](tools/env-config-generator.html) directly
+in a browser. Fill in the bank/account mappings and importer profiles, click
+**Generate JSON**, then copy the resulting `.env` block into `.env`. The page
+runs locally and does not send the entered values anywhere.
 
 ## GHCR publishing
 

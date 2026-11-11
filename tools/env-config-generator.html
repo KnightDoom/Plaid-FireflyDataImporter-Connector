@@ -1,0 +1,821 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plaid → Firefly .env generator</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17212b;
+      --muted: #5d6b78;
+      --line: #d9e0e6;
+      --panel: #ffffff;
+      --page: #f4f7f9;
+      --accent: #1769aa;
+      --accent-dark: #0d4d80;
+      --danger: #a82828;
+      --success: #1c6b3c;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font: 15px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { max-width: 1120px; margin: 0 auto; padding: 28px 18px 56px; }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { margin: 0 0 8px; font-size: clamp(1.8rem, 4vw, 2.6rem); }
+    h2 { margin: 0; font-size: 1.25rem; }
+    h3 { margin: 0 0 14px; font-size: 1rem; }
+    p { color: var(--muted); }
+    .intro { max-width: 820px; margin-bottom: 22px; }
+    .notice {
+      border-left: 4px solid var(--accent);
+      background: #eaf4fc;
+      padding: 12px 14px;
+      margin: 18px 0 24px;
+    }
+    .notice p { margin: 0; }
+    .section, .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 3px 12px rgb(23 33 43 / 5%);
+    }
+    .section { padding: 20px; margin-top: 18px; }
+    .section-title, .card-title, .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .card { padding: 18px; margin-top: 14px; }
+    .card-title { margin-bottom: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .grid-wide { grid-column: 1 / -1; }
+    label { display: block; font-weight: 650; }
+    label span { display: block; margin-bottom: 5px; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid #b9c5cf;
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      padding: 9px 10px;
+    }
+    textarea { min-height: 120px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88rem; }
+    input:focus, select:focus, textarea:focus { outline: 3px solid rgb(23 105 170 / 18%); border-color: var(--accent); }
+    button {
+      border: 0;
+      border-radius: 7px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+      padding: 9px 13px;
+    }
+    button:hover { background: var(--accent-dark); }
+    button.secondary { background: #e8eef3; color: var(--ink); }
+    button.secondary:hover { background: #d7e1e9; }
+    button.danger { background: #f8e6e6; color: var(--danger); }
+    button.danger:hover { background: #f2d0d0; }
+    button.small { padding: 6px 9px; font-size: .88rem; }
+    .help { margin: 5px 0 0; color: var(--muted); font-size: .88rem; }
+    .account-list { overflow-x: auto; margin-top: 15px; }
+    table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; }
+    td input { min-width: 110px; }
+    .columns-table { min-width: 660px; }
+    .columns-table td:last-child, .accounts-table td:last-child { width: 1%; white-space: nowrap; }
+    .profile-config { min-height: 170px; }
+    .error-list { color: var(--danger); margin: 0 0 14px; padding-left: 22px; }
+    .success { color: var(--success); font-weight: 700; min-height: 1.5em; }
+    .output { min-height: 210px; }
+    .logs { min-height: 150px; }
+    .state-output { min-height: 220px; }
+    .button-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .footer-note { margin-top: 20px; font-size: .9rem; }
+    @media (max-width: 760px) {
+      main { padding: 20px 12px 40px; }
+      .grid { grid-template-columns: 1fr; }
+      .grid-wide { grid-column: auto; }
+      .section { padding: 15px; }
+      .section-title, .card-title, .toolbar { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="intro">
+      <h1>Plaid → Firefly .env generator</h1>
+      <p>Build the JSON values used by <code>.env</code> for this connector. This is a standalone page: save it locally or open it directly from the repository with <code>file://</code>. It does not contact Plaid, Firefly, or any other server.</p>
+      <div class="notice"><p><strong>Keep this page private.</strong> Access tokens and account mappings are sensitive. The page keeps values in your browser tab and only produces text when you click Generate.</p></div>
+    </div>
+
+    <section class="section">
+      <div class="section-title">
+        <div>
+          <h2>Load existing JSON</h2>
+          <p class="help">Paste raw JSON, a generated <code>NAME=...</code> line, or the complete generated .env block. Loaded values replace the matching editor sections.</p>
+        </div>
+        <button type="button" id="load-existing">Load JSON</button>
+      </div>
+      <div class="grid">
+        <label class="grid-wide"><span>PLAID_ITEMS_JSON</span><textarea data-existing-json="PLAID_ITEMS_JSON" spellcheck="false" placeholder='{"items":[...]}'></textarea></label>
+        <label class="grid-wide"><span>IMPORTER_DESTINATIONS_JSON</span><textarea data-existing-json="IMPORTER_DESTINATIONS_JSON" spellcheck="false" placeholder='{"bank-one":"/exports/bank-one"}'></textarea></label>
+        <label class="grid-wide"><span>IMPORTER_PROFILES_JSON</span><textarea data-existing-json="IMPORTER_PROFILES_JSON" spellcheck="false" placeholder='{"bank-one-chequing":{"importer_config":{},"csv":{...}}}'></textarea></label>
+      </div>
+      <div id="load-status" class="success" aria-live="polite"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <div>
+          <h2>1. Banks and accounts</h2>
+          <p class="help">The bank key must match the key used in the destination mapping.</p>
+        </div>
+        <button type="button" id="add-bank">Add bank</button>
+      </div>
+      <div id="bank-list"></div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <div>
+          <h2>2. Importer profiles</h2>
+          <p class="help">Paste the exported Firefly Data Importer JSON, then define the CSV columns. Every profile needs one <code>external_id</code> column.</p>
+        </div>
+        <button type="button" id="add-profile">Add profile</button>
+      </div>
+      <div id="profile-list"></div>
+    </section>
+
+    <section class="section">
+      <div class="toolbar">
+        <div>
+          <h2>3. Generate .env values</h2>
+          <p class="help">The output is one-line JSON suitable for pasting after the matching environment variable.</p>
+        </div>
+        <button type="button" id="generate">Generate JSON</button>
+      </div>
+      <div id="errors" aria-live="polite"></div>
+      <label for="env-output"><span>Copy-ready .env block</span></label>
+      <textarea id="env-output" class="output" readonly spellcheck="false" placeholder="Validation messages and generated .env lines will appear here."></textarea>
+      <div class="toolbar" style="margin-top: 10px;">
+        <span id="status" class="success" aria-live="polite"></span>
+        <button type="button" id="copy" class="secondary">Copy .env block</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">
+        <div>
+          <h2>Diagnostics and state</h2>
+          <p class="help">Logs avoid secret values. The state export captures all current fields, including tokens and importer JSON, so treat the file as sensitive.</p>
+        </div>
+        <div class="button-row">
+          <button type="button" id="export-state">Export state JSON</button>
+          <button type="button" id="copy-state" class="secondary">Copy state JSON</button>
+        </div>
+      </div>
+      <label for="state-output"><span>Current state JSON</span></label>
+      <textarea id="state-output" class="state-output" readonly spellcheck="false" placeholder="Click Export state JSON to capture the current form values."></textarea>
+      <div class="toolbar" style="margin-top: 16px;">
+        <label for="logs-output"><span>Generation logs</span></label>
+        <button type="button" id="copy-logs" class="secondary">Copy logs</button>
+      </div>
+      <textarea id="logs-output" class="logs" readonly spellcheck="false" placeholder="Actions and errors will appear here."></textarea>
+      <div id="diagnostic-status" class="success" aria-live="polite"></div>
+    </section>
+
+    <p class="footer-note">The generated CSV destination paths are container paths, such as <code>/exports/bank-one</code>. Mount the corresponding host directory into both the connector and Firefly Data Importer containers.</p>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const CSV_FIELDS = [
+        "date", "authorized_date", "description", "name", "merchant_name",
+        "original_description", "amount", "amount_absolute", "debit", "credit",
+        "external_id", "currency_code", "account_id", "account_name",
+        "transaction_id", "payment_channel", "check_number", "constant", "blank"
+      ];
+      const bankList = document.getElementById("bank-list");
+      const profileList = document.getElementById("profile-list");
+      const errors = document.getElementById("errors");
+      const output = document.getElementById("env-output");
+      const status = document.getElementById("status");
+      const stateOutput = document.getElementById("state-output");
+      const logsOutput = document.getElementById("logs-output");
+      const diagnosticStatus = document.getElementById("diagnostic-status");
+      const logs = [];
+
+      function addLog(level, message, error) {
+        const timestamp = new Date().toISOString();
+        const detail = error && error.stack ? `\n${error.stack}` : "";
+        logs.push(`[${timestamp}] ${level}: ${message}${detail}`);
+        if (logs.length > 200) logs.shift();
+        logsOutput.value = logs.join("\n");
+        logsOutput.scrollTop = logsOutput.scrollHeight;
+      }
+
+      function copyText(value, fallbackElement, message) {
+        if (!value) {
+          diagnosticStatus.textContent = "There is nothing to copy yet.";
+          return;
+        }
+        if (!navigator.clipboard || !navigator.clipboard.writeText) {
+          fallbackElement.focus();
+          fallbackElement.select();
+          diagnosticStatus.textContent = "Clipboard access was blocked; press Ctrl/Cmd+C to copy the selected text.";
+          return;
+        }
+        navigator.clipboard.writeText(value).then(() => {
+          diagnosticStatus.textContent = message;
+        }).catch(() => {
+          fallbackElement.focus();
+          fallbackElement.select();
+          diagnosticStatus.textContent = "Clipboard access was blocked; press Ctrl/Cmd+C to copy the selected text.";
+        });
+      }
+
+      function mockDate(format) {
+        return (format || "%Y-%m-%d")
+          .replace(/%-?Y/g, "2026")
+          .replace(/%-?m/g, "01")
+          .replace(/%-?d/g, "15")
+          .replace(/%B/g, "January")
+          .replace(/%b/g, "Jan");
+      }
+
+      function mockAmount(amount, config) {
+        const absolute = Math.abs(amount).toFixed(2);
+        let [whole, fraction] = absolute.split(".");
+        const thousands = config.thousands_separator;
+        if (thousands) whole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, thousands);
+        const value = `${whole}${config.decimal_separator || "."}${fraction}`;
+        return amount < 0 ? `-${value}` : value;
+      }
+
+      function mockCell(field, amount, config, rowNumber) {
+        const key = field.field;
+        if (key === "date" || key === "authorized_date") return mockDate(config.date_format);
+        if (key === "amount") {
+          const signedAmount = config.amount_sign === "absolute" ? Math.abs(amount) :
+            config.amount_sign === "inflow_positive" ? -amount : amount;
+          return mockAmount(signedAmount, config);
+        }
+        if (key === "amount_absolute") return mockAmount(Math.abs(amount), config);
+        if (key === "debit") return amount > 0 ? mockAmount(amount, config) : "";
+        if (key === "credit") return amount < 0 ? mockAmount(Math.abs(amount), config) : "";
+        if (["description", "name", "merchant_name", "original_description"].includes(key)) {
+          return rowNumber === 1 ? "Example Coffee Shop" : "Example Grocery Store";
+        }
+        if (key === "external_id") return `plaid:mock:transaction-${String(rowNumber).padStart(3, "0")}`;
+        if (key === "currency_code") return "CAD";
+        if (key === "account_id") return "mock-account";
+        if (key === "account_name") return "Mock Checking";
+        if (key === "transaction_id") return `mock-transaction-${String(rowNumber).padStart(3, "0")}`;
+        if (key === "payment_channel") return "in store";
+        if (key === "check_number") return rowNumber === 1 ? "1234" : "";
+        if (key === "constant") return field.value || "Example";
+        return "";
+      }
+
+      function csvCell(value, delimiter) {
+        const textValue = String(value ?? "");
+        if (textValue.includes('"') || textValue.includes(delimiter) || /[\r\n]/.test(textValue)) {
+          return `"${textValue.replace(/"/g, '""')}"`;
+        }
+        return textValue;
+      }
+
+      function exportMockCsv(profileCard) {
+        try {
+          const profileName = text(profileCard, "[data-profile-name]") || "importer-profile";
+          const delimiter = text(profileCard, "[data-delimiter]") || ",";
+          const config = {
+            date_format: text(profileCard, "[data-date-format]"),
+            delimiter,
+            decimal_separator: profileCard.querySelector("[data-decimal]").value,
+            thousands_separator: profileCard.querySelector("[data-thousands]").value === "space" ? " " : profileCard.querySelector("[data-thousands]").value,
+            amount_sign: profileCard.querySelector("[data-amount-sign]").value,
+            include_header: profileCard.querySelector("[data-include-header]").checked,
+            line_ending: profileCard.querySelector("[data-line-ending]").value
+          };
+          const columns = Array.from(profileCard.querySelectorAll(".columns-table tbody tr")).map((row) => ({
+            header: text(row, "[data-column-header]"),
+            field: row.querySelector("[data-column-field]").value,
+            value: text(row, "[data-column-value]")
+          }));
+          if (!columns.length) throw new Error(`Profile ${profileName}: add at least one CSV column.`);
+          const rows = [12.34, -56.78].map((amount, index) => columns.map((column) => mockCell(column, amount, config, index + 1)));
+          const lineEnding = config.line_ending === "lf" ? "\n" : "\r\n";
+          const lines = [];
+          if (config.include_header) lines.push(columns.map((column) => csvCell(column.header, delimiter)).join(delimiter));
+          rows.forEach((row) => lines.push(row.map((value) => csvCell(value, delimiter)).join(delimiter)));
+          const csv = lines.join(lineEnding) + lineEnding;
+          const fileName = `mock-${profileName.replace(/[^A-Za-z0-9._-]+/g, "-")}.csv`;
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+          link.download = fileName;
+          link.click();
+          URL.revokeObjectURL(link.href);
+          diagnosticStatus.textContent = `Downloaded ${fileName}. Use it to configure Firefly Data Importer.`;
+          addLog("INFO", `Mock CSV exported for profile ${profileName}.`);
+        } catch (error) {
+          diagnosticStatus.textContent = "Mock CSV export failed.";
+          addLog("ERROR", error.message, error);
+        }
+      }
+
+      function collectCurrentState() {
+        return {
+          schema_version: 1,
+          exported_at: new Date().toISOString(),
+          existing_json_inputs: Object.fromEntries(Array.from(document.querySelectorAll("[data-existing-json]")).map((field) => [field.dataset.existingJson, field.value])),
+          banks: Array.from(document.querySelectorAll(".bank-card")).map((card) => ({
+            key: card.querySelector("[data-bank-key]").value,
+            access_token: card.querySelector("[data-access-token]").value,
+            destination: card.querySelector("[data-destination]").value,
+            ignored_account_ids: card.querySelector("[data-ignored]").value,
+            accounts: Array.from(card.querySelectorAll("tbody tr")).map((row) => ({
+              plaid_account_id: row.querySelector("[data-account-id]").value,
+              firefly_account_id: row.querySelector("[data-firefly-id]").value,
+              currency: row.querySelector("[data-currency]").value,
+              importer_profile: row.querySelector("[data-profile-select]").value
+            }))
+          })),
+          profiles: Array.from(document.querySelectorAll(".profile-card")).map((card) => ({
+            name: card.querySelector("[data-profile-name]").value,
+            date_format: card.querySelector("[data-date-format]").value,
+            delimiter: card.querySelector("[data-delimiter]").value,
+            encoding: card.querySelector("[data-encoding]").value,
+            decimal_separator: card.querySelector("[data-decimal]").value,
+            thousands_separator: card.querySelector("[data-thousands]").value,
+            amount_sign: card.querySelector("[data-amount-sign]").value,
+            line_ending: card.querySelector("[data-line-ending]").value,
+            include_header: card.querySelector("[data-include-header]").checked,
+            importer_config_text: card.querySelector("[data-importer-config]").value,
+            csv_extra_fields: JSON.parse(card.dataset.csvExtras || "{}"),
+            profile_extra_fields: JSON.parse(card.dataset.profileExtras || "{}"),
+            columns: Array.from(card.querySelectorAll(".columns-table tbody tr")).map((row) => ({
+              header: row.querySelector("[data-column-header]").value,
+              field: row.querySelector("[data-column-field]").value,
+              value: row.querySelector("[data-column-value]").value
+            }))
+          })),
+          generated_env_block: output.value
+        };
+      }
+
+      function exportState() {
+        try {
+          const state = JSON.stringify(collectCurrentState(), null, 2);
+          stateOutput.value = state;
+          const blob = new Blob([state], { type: "application/json" });
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = "plaid-firefly-generator-state.json";
+          link.click();
+          URL.revokeObjectURL(link.href);
+          diagnosticStatus.textContent = "State exported. Treat the downloaded JSON as sensitive.";
+          addLog("INFO", "Current form state exported.");
+        } catch (error) {
+          diagnosticStatus.textContent = "State export failed.";
+          addLog("ERROR", "State export failed.", error);
+        }
+      }
+
+      function fieldOptions(selected) {
+        return CSV_FIELDS.map((field) => `<option value="${field}"${field === selected ? " selected" : ""}>${field}</option>`).join("");
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+        })[character]);
+      }
+
+      function addBank(values = {}) {
+        const card = document.createElement("article");
+        card.className = "card bank-card";
+        card.innerHTML = `
+          <div class="card-title">
+            <h3>Bank connection</h3>
+            <button type="button" class="danger small remove-bank">Remove bank</button>
+          </div>
+          <div class="grid">
+            <label><span>Bank key</span><input data-bank-key placeholder="bank-one" value="${escapeHtml(values.key)}"></label>
+            <label><span>Plaid access token</span><input data-access-token type="password" autocomplete="off" placeholder="access-sandbox-..." value="${escapeHtml(values.accessToken)}"></label>
+            <label><span>CSV destination directory</span><input data-destination placeholder="/exports/bank-one" value="${escapeHtml(values.destination)}"></label>
+            <label><span>Ignored account IDs <em>(optional, comma-separated)</em></span><input data-ignored placeholder="account-id-to-skip" value="${escapeHtml(values.ignored)}"></label>
+          </div>
+          <div class="account-list">
+            <table class="accounts-table">
+              <thead><tr><th>Plaid account ID</th><th>Firefly account ID</th><th>Currency</th><th>Importer profile</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <button type="button" class="secondary small add-account" style="margin-top: 12px;">Add account</button>`;
+        bankList.appendChild(card);
+        (values.accounts || [{}]).forEach((account) => addAccount(card, account));
+      }
+
+      function addAccount(bankCard, values = {}) {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td><input data-account-id placeholder="plaid-account-id" value="${escapeHtml(values.id)}"></td>
+          <td><input data-firefly-id type="number" min="1" step="1" placeholder="1" value="${escapeHtml(values.fireflyId)}"></td>
+          <td><input data-currency maxlength="3" placeholder="CAD" value="${escapeHtml(values.currency)}"></td>
+          <td><select data-profile-select aria-label="Importer profile"><option value="">No importer profile</option></select></td>
+          <td><button type="button" class="danger small remove-account">Remove</button></td>`;
+        row.querySelector("[data-profile-select]").dataset.pendingProfile = values.profile || "";
+        bankCard.querySelector("tbody").appendChild(row);
+        refreshProfileOptions();
+      }
+
+      function refreshProfileOptions() {
+        const names = Array.from(document.querySelectorAll(".profile-card [data-profile-name]"))
+          .map((input) => input.value.trim())
+          .filter(Boolean);
+        document.querySelectorAll("[data-profile-select]").forEach((select) => {
+          const selected = select.dataset.pendingProfile ?? select.value;
+          select.innerHTML = '<option value="">No importer profile</option>' +
+            names.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+          if (names.includes(selected)) select.value = selected;
+          select.dataset.pendingProfile = select.value;
+        });
+      }
+
+      function addProfile(values = {}) {
+        const card = document.createElement("article");
+        card.className = "card profile-card";
+        card.innerHTML = `
+          <div class="card-title">
+            <h3>Importer profile</h3>
+            <div class="button-row">
+              <button type="button" class="secondary small export-mock-csv">Download mock CSV</button>
+              <button type="button" class="danger small remove-profile">Remove profile</button>
+            </div>
+          </div>
+          <div class="grid">
+            <label><span>Profile name</span><input data-profile-name placeholder="bank-one-chequing" value="${escapeHtml(values.name)}"></label>
+            <label><span>Date format</span><input data-date-format value="${escapeHtml(values.dateFormat || "%Y-%m-%d")}"></label>
+            <label><span>Delimiter</span><input data-delimiter maxlength="1" value="${escapeHtml(values.delimiter || ",")}"></label>
+            <label><span>Encoding</span><select data-encoding>
+              <option${(values.encoding || "utf-8") === "utf-8" ? " selected" : ""}>utf-8</option>
+              <option${values.encoding === "utf-8-sig" ? " selected" : ""}>utf-8-sig</option>
+              <option${values.encoding === "cp1252" ? " selected" : ""}>cp1252</option>
+              <option${values.encoding === "iso-8859-1" ? " selected" : ""}>iso-8859-1</option>
+            </select></label>
+            <label><span>Decimal separator</span><select data-decimal><option${(values.decimal || ".") === "." ? " selected" : ""}>.</option><option${values.decimal === "," ? " selected" : ""}>,</option></select></label>
+            <label><span>Thousands separator</span><select data-thousands><option${!values.thousands ? " selected" : ""} value="">none</option><option${values.thousands === "." ? " selected" : ""}>.</option><option${values.thousands === "," ? " selected" : ""}>,</option><option${values.thousands === " " ? " selected" : ""}>space</option></select></label>
+            <label><span>Amount sign</span><select data-amount-sign><option${(values.amountSign || "inflow_positive") === "inflow_positive" ? " selected" : ""}>inflow_positive</option><option${values.amountSign === "outflow_positive" ? " selected" : ""}>outflow_positive</option><option${values.amountSign === "absolute" ? " selected" : ""}>absolute</option></select></label>
+            <label><span>Line ending</span><select data-line-ending><option${(values.lineEnding || "crlf") === "crlf" ? " selected" : ""}>crlf</option><option${values.lineEnding === "lf" ? " selected" : ""}>lf</option></select></label>
+            <label style="padding-top: 29px;"><input data-include-header type="checkbox"${values.includeHeader === false ? "" : " checked"} style="width: auto; margin-right: 7px;">Include CSV header</label>
+            <label class="grid-wide"><span>Exported Data Importer JSON</span><textarea data-importer-config class="profile-config" spellcheck="false" placeholder='Paste the exported importer configuration JSON here, for example: {"importer":"bank"}'>${escapeHtml(values.importerConfig)}</textarea></label>
+          </div>
+          <div class="account-list">
+            <table class="columns-table">
+              <thead><tr><th>CSV header</th><th>Field</th><th>Constant value (only for constant)</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <button type="button" class="secondary small add-column" style="margin-top: 12px;">Add CSV column</button>`;
+        profileList.appendChild(card);
+        card.dataset.csvExtras = JSON.stringify(values.csvExtras || {});
+        card.dataset.profileExtras = JSON.stringify(values.profileExtras || {});
+        card.querySelector("[data-profile-name]").dataset.previousName = values.name || "";
+        (values.columns || [
+          { header: "Date", field: "date" },
+          { header: "Description", field: "description" },
+          { header: "Amount", field: "amount" },
+          { header: "Currency", field: "currency_code" },
+          { header: "External ID", field: "external_id" }
+        ]).forEach((column) => addColumn(card, column));
+        refreshProfileOptions();
+      }
+
+      function addColumn(profileCard, values = {}) {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td><input data-column-header placeholder="External ID" value="${escapeHtml(values.header)}"></td>
+          <td><select data-column-field>${fieldOptions(values.field || "external_id")}</select></td>
+          <td><input data-column-value placeholder="Optional constant value" value="${escapeHtml(values.value)}"></td>
+          <td><button type="button" class="danger small remove-column">Remove</button></td>`;
+        profileCard.querySelector("tbody").appendChild(row);
+      }
+
+      function text(card, selector) {
+        return card.querySelector(selector).value.trim();
+      }
+
+      function collectBanks() {
+        const items = [];
+        const destinations = {};
+        const seen = new Set();
+        document.querySelectorAll(".bank-card").forEach((card, index) => {
+          const key = text(card, "[data-bank-key]");
+          const accessToken = text(card, "[data-access-token]");
+          const destination = text(card, "[data-destination]");
+          if (!key) throw new Error(`Bank ${index + 1}: bank key is required.`);
+          if (seen.has(key)) throw new Error(`Bank ${index + 1}: bank key ${key} is duplicated.`);
+          if (!accessToken) throw new Error(`Bank ${key}: Plaid access token is required.`);
+          if (!destination.startsWith("/")) throw new Error(`Bank ${key}: destination must be an absolute container path.`);
+          seen.add(key);
+          destinations[key] = destination;
+          const accounts = {};
+          const accountIds = new Set();
+          card.querySelectorAll("tbody tr").forEach((row, accountIndex) => {
+            const id = text(row, "[data-account-id]");
+            const fireflyId = text(row, "[data-firefly-id]");
+            const currency = text(row, "[data-currency]").toUpperCase();
+            const profile = row.querySelector("[data-profile-select]").value;
+            if (!id || !fireflyId || !currency) throw new Error(`Bank ${key}, account ${accountIndex + 1}: ID, Firefly ID, and currency are required.`);
+            if (!/^\d+$/.test(fireflyId)) throw new Error(`Bank ${key}, account ${id}: Firefly account ID must be an integer.`);
+            if (!/^[A-Z]{3}$/.test(currency)) throw new Error(`Bank ${key}, account ${id}: currency must be a 3-letter ISO code.`);
+            if (accountIds.has(id)) throw new Error(`Bank ${key}: account ID ${id} is duplicated.`);
+            accountIds.add(id);
+            const account = { firefly_account_id: Number(fireflyId), currency };
+            if (profile) account.importer_profile = profile;
+            accounts[id] = account;
+          });
+          if (!Object.keys(accounts).length) throw new Error(`Bank ${key}: add at least one account.`);
+          const ignored = text(card, "[data-ignored]").split(",").map((value) => value.trim()).filter(Boolean);
+          const item = { key, access_token: accessToken, accounts };
+          if (ignored.length) item.ignore_accounts = ignored;
+          items.push(item);
+        });
+        if (!items.length) throw new Error("Add at least one bank.");
+        return { items, destinations };
+      }
+
+      function collectProfiles() {
+        const profiles = {};
+        const seen = new Set();
+        document.querySelectorAll(".profile-card").forEach((card, index) => {
+          const name = text(card, "[data-profile-name]");
+          if (!name) throw new Error(`Profile ${index + 1}: profile name is required.`);
+          if (seen.has(name)) throw new Error(`Profile ${index + 1}: profile name ${name} is duplicated.`);
+          let importerConfig;
+          try { importerConfig = JSON.parse(text(card, "[data-importer-config]")); }
+          catch (error) { throw new Error(`Profile ${name}: importer_config is not valid JSON.`); }
+          if (!importerConfig || typeof importerConfig !== "object" || Array.isArray(importerConfig) || !Object.keys(importerConfig).length) {
+            throw new Error(`Profile ${name}: paste a non-empty exported importer_config object.`);
+          }
+          const columns = [];
+          const headers = new Set();
+          card.querySelectorAll(".columns-table tbody tr").forEach((row, columnIndex) => {
+            const header = text(row, "[data-column-header]");
+            const field = row.querySelector("[data-column-field]").value;
+            const value = text(row, "[data-column-value]");
+            if (!header) throw new Error(`Profile ${name}, column ${columnIndex + 1}: header is required.`);
+            if (headers.has(header)) throw new Error(`Profile ${name}: CSV header ${header} is duplicated.`);
+            headers.add(header);
+            const column = { header, field };
+            if (field === "constant") {
+              if (!value) throw new Error(`Profile ${name}, column ${header}: constant value is required.`);
+              column.value = value;
+            }
+            columns.push(column);
+          });
+          if (columns.filter((column) => column.field === "external_id").length !== 1) {
+            throw new Error(`Profile ${name}: CSV columns must contain exactly one external_id field.`);
+          }
+          const thousands = card.querySelector("[data-thousands]").value;
+          const csvExtras = JSON.parse(card.dataset.csvExtras || "{}");
+          const profileExtras = JSON.parse(card.dataset.profileExtras || "{}");
+          profiles[name] = {
+            ...profileExtras,
+            importer_config: importerConfig,
+            csv: {
+              ...csvExtras,
+              date_format: text(card, "[data-date-format]"),
+              delimiter: text(card, "[data-delimiter]"),
+              encoding: card.querySelector("[data-encoding]").value,
+              decimal_separator: card.querySelector("[data-decimal]").value,
+              thousands_separator: thousands === "space" ? " " : thousands,
+              amount_sign: card.querySelector("[data-amount-sign]").value,
+              line_ending: card.querySelector("[data-line-ending]").value,
+              include_header: card.querySelector("[data-include-header]").checked,
+              columns
+            }
+          };
+          seen.add(name);
+        });
+        if (!Object.keys(profiles).length) throw new Error("Add at least one importer profile.");
+        return profiles;
+      }
+
+      function parseExistingJson(name) {
+        const field = document.querySelector(`[data-existing-json="${name}"]`);
+        let source = field.value.trim();
+        if (!source) return null;
+        if (source.startsWith(`${name}=`)) source = source.slice(name.length + 1).trim();
+        else {
+          const envLine = source.split(/\r?\n/).map((line) => line.trim()).find((line) => line.startsWith(`${name}=`));
+          if (envLine) source = envLine.slice(name.length + 1).trim();
+        }
+        try { return JSON.parse(source); }
+        catch (error) { throw new Error(`${name}: pasted value is not valid JSON.`); }
+      }
+
+      function loadExisting() {
+        const loadStatus = document.getElementById("load-status");
+        loadStatus.textContent = "";
+        errors.innerHTML = "";
+        diagnosticStatus.textContent = "";
+        addLog("INFO", "Loading existing JSON values.");
+        try {
+          const existingItems = parseExistingJson("PLAID_ITEMS_JSON");
+          const existingDestinations = parseExistingJson("IMPORTER_DESTINATIONS_JSON");
+          const existingProfiles = parseExistingJson("IMPORTER_PROFILES_JSON");
+          if (existingItems === null && existingDestinations === null && existingProfiles === null) {
+            throw new Error("Paste at least one JSON value before loading.");
+          }
+
+          if (existingItems !== null) {
+            if (!existingItems || !Array.isArray(existingItems.items)) {
+              throw new Error("PLAID_ITEMS_JSON must contain an items array.");
+            }
+            bankList.innerHTML = "";
+            existingItems.items.forEach((item) => {
+              const accounts = Object.entries(item.accounts || {}).map(([id, account]) => ({
+                id,
+                fireflyId: account.firefly_account_id,
+                currency: account.currency,
+                profile: account.importer_profile
+              }));
+              addBank({
+                key: item.key,
+                accessToken: item.access_token,
+                destination: existingDestinations && existingDestinations[item.key] || `/exports/${item.key}`,
+                ignored: (item.ignore_accounts || []).join(", "),
+                accounts
+              });
+            });
+          }
+
+          if (existingDestinations !== null) {
+            if (!existingDestinations || Array.isArray(existingDestinations) || typeof existingDestinations !== "object") {
+              throw new Error("IMPORTER_DESTINATIONS_JSON must be a bank-to-directory object.");
+            }
+            document.querySelectorAll(".bank-card").forEach((card) => {
+              const key = text(card, "[data-bank-key]");
+              if (Object.prototype.hasOwnProperty.call(existingDestinations, key)) {
+                card.querySelector("[data-destination]").value = existingDestinations[key];
+              }
+            });
+          }
+
+          if (existingProfiles !== null) {
+            if (!existingProfiles || Array.isArray(existingProfiles) || typeof existingProfiles !== "object") {
+              throw new Error("IMPORTER_PROFILES_JSON must be a profile mapping object.");
+            }
+            profileList.innerHTML = "";
+            Object.entries(existingProfiles).forEach(([name, profile]) => {
+              const csv = profile.csv || {};
+              const knownCsvKeys = new Set(["date_format", "delimiter", "encoding", "decimal_separator", "thousands_separator", "amount_sign", "line_ending", "include_header", "columns"]);
+              const csvExtras = Object.fromEntries(Object.entries(csv).filter(([key]) => !knownCsvKeys.has(key)));
+              const profileExtras = Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "importer_config" && key !== "csv"));
+              addProfile({
+                name,
+                dateFormat: csv.date_format,
+                delimiter: csv.delimiter,
+                encoding: csv.encoding,
+                decimal: csv.decimal_separator,
+                thousands: csv.thousands_separator,
+                amountSign: csv.amount_sign,
+                lineEnding: csv.line_ending,
+                includeHeader: csv.include_header,
+                importerConfig: JSON.stringify(profile.importer_config || {}, null, 2),
+                columns: csv.columns || [],
+                csvExtras,
+                profileExtras
+              });
+            });
+          }
+          loadStatus.textContent = "Existing JSON loaded. Review the fields, then generate the updated .env block.";
+          addLog("INFO", "Existing JSON values loaded into the form.");
+        } catch (error) {
+          const list = document.createElement("ul");
+          list.className = "error-list";
+          const item = document.createElement("li");
+          item.textContent = error.message;
+          list.appendChild(item);
+          errors.appendChild(list);
+          addLog("ERROR", error.message, error);
+        }
+      }
+
+      function generate() {
+        errors.innerHTML = "";
+        status.textContent = "";
+        diagnosticStatus.textContent = "";
+        addLog("INFO", "Generation started.");
+        try {
+          const banks = collectBanks();
+          const profiles = collectProfiles();
+          const outputLines = [
+            `PLAID_ITEMS_JSON=${JSON.stringify(banks.items)}`,
+            `IMPORTER_DESTINATIONS_JSON=${JSON.stringify(banks.destinations)}`,
+            `IMPORTER_PROFILES_JSON=${JSON.stringify(profiles)}`
+          ];
+          output.value = outputLines.join("\n");
+          status.textContent = "Generated successfully. Review the values before saving .env.";
+          addLog("INFO", "Generation completed successfully.");
+        } catch (error) {
+          output.value = "";
+          const list = document.createElement("ul");
+          list.className = "error-list";
+          const item = document.createElement("li");
+          item.textContent = error.message;
+          list.appendChild(item);
+          errors.appendChild(list);
+          addLog("ERROR", error.message, error);
+        }
+      }
+
+      async function copyOutput() {
+        if (!output.value) { generate(); }
+        if (!output.value) return;
+        try {
+          await navigator.clipboard.writeText(output.value);
+          status.textContent = "Copied to clipboard.";
+        } catch (error) {
+          output.focus();
+          output.select();
+          status.textContent = "Clipboard access was blocked; press Ctrl/Cmd+C to copy the selected text.";
+        }
+      }
+
+      function copyLogs() {
+        copyText(logsOutput.value, logsOutput, "Logs copied to clipboard.");
+      }
+
+      function copyState() {
+        if (!stateOutput.value) exportState();
+        copyText(stateOutput.value, stateOutput, "State JSON copied to clipboard.");
+      }
+
+      bankList.addEventListener("click", (event) => {
+        const target = event.target;
+        const card = target.closest(".bank-card");
+        if (target.closest(".remove-bank")) card.remove();
+        if (target.closest(".add-account")) addAccount(card);
+        if (target.closest(".remove-account")) target.closest("tr").remove();
+      });
+      bankList.addEventListener("change", (event) => {
+        if (event.target.matches("[data-profile-select]")) {
+          event.target.dataset.pendingProfile = event.target.value;
+        }
+      });
+      profileList.addEventListener("click", (event) => {
+        const target = event.target;
+        const card = target.closest(".profile-card");
+        if (target.closest(".export-mock-csv")) exportMockCsv(card);
+        if (target.closest(".remove-profile")) {
+          card.remove();
+          refreshProfileOptions();
+        }
+        if (target.closest(".add-column")) addColumn(card);
+        if (target.closest(".remove-column")) target.closest("tr").remove();
+      });
+      profileList.addEventListener("change", (event) => {
+        if (event.target.matches("[data-profile-name]")) {
+          const oldName = event.target.dataset.previousName || "";
+          const newName = event.target.value.trim();
+          document.querySelectorAll("[data-profile-select]").forEach((select) => {
+            if (select.dataset.pendingProfile === oldName) select.dataset.pendingProfile = newName;
+          });
+          event.target.dataset.previousName = newName;
+          refreshProfileOptions();
+        }
+      });
+      document.getElementById("add-bank").addEventListener("click", () => addBank());
+      document.getElementById("add-profile").addEventListener("click", () => addProfile());
+      document.getElementById("load-existing").addEventListener("click", loadExisting);
+      document.getElementById("generate").addEventListener("click", generate);
+      document.getElementById("copy").addEventListener("click", copyOutput);
+      document.getElementById("export-state").addEventListener("click", exportState);
+      document.getElementById("copy-state").addEventListener("click", copyState);
+      document.getElementById("copy-logs").addEventListener("click", copyLogs);
+
+      window.addEventListener("error", (event) => addLog("ERROR", event.message || "Unhandled browser error.", event.error));
+      window.addEventListener("unhandledrejection", (event) => addLog("ERROR", "Unhandled promise rejection.", event.reason));
+
+      addBank({ key: "bank-one", destination: "/exports/bank-one", accounts: [{ profile: "bank-one-chequing" }] });
+      addProfile({ name: "bank-one-chequing" });
+      addLog("INFO", "Generator loaded.");
+    })();
+  </script>
+</body>
+</html>

@@ -10,6 +10,7 @@ services:
       TMPDIR: /tmp
     volumes:
       - plaid-firefly-config:/config
+      - plaid-firefly-exports:/exports
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     read_only: true
@@ -22,3 +23,4 @@ services:
 
 volumes:
   plaid-firefly-config:
+  plaid-firefly-exports:
