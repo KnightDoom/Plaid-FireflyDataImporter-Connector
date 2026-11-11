@@ -100,6 +100,12 @@
     .logs { min-height: 150px; }
     .state-output { min-height: 220px; }
     .button-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .help-callout { margin-top: 16px; padding: 10px 12px; border-left: 4px solid var(--accent); background: #eaf4fc; color: var(--muted); }
+    details.section > summary { cursor: pointer; list-style: none; }
+    details.section > summary::-webkit-details-marker { display: none; }
+    details.section > summary::before { content: "▸"; display: inline-block; margin-right: 8px; color: var(--accent); }
+    details.section[open] > summary::before { content: "▾"; }
+    .diagnostics-body { margin-top: 16px; }
     .footer-note { margin-top: 20px; font-size: .9rem; }
     @media (max-width: 760px) {
       main { padding: 20px 12px 40px; }
@@ -173,26 +179,28 @@
       </div>
     </section>
 
-    <section class="section">
-      <div class="section-title">
+    <details class="section" id="diagnostics-panel">
+      <summary class="section-title">
         <div>
           <h2>Diagnostics and state</h2>
           <p class="help">Logs avoid secret values. The state export captures all current fields, including tokens and importer JSON, so treat the file as sensitive.</p>
         </div>
+      </summary>
+      <div class="diagnostics-body">
         <div class="button-row">
           <button type="button" id="export-state">Export state JSON</button>
           <button type="button" id="copy-state" class="secondary">Copy state JSON</button>
         </div>
+        <label for="state-output"><span>Current state JSON</span></label>
+        <textarea id="state-output" class="state-output" readonly spellcheck="false" placeholder="Click Export state JSON to capture the current form values."></textarea>
+        <div class="toolbar" style="margin-top: 16px;">
+          <label for="logs-output"><span>Generation logs</span></label>
+          <button type="button" id="copy-logs" class="secondary">Copy logs</button>
+        </div>
+        <textarea id="logs-output" class="logs" readonly spellcheck="false" placeholder="Actions and errors will appear here."></textarea>
+        <div id="diagnostic-status" class="success" aria-live="polite"></div>
       </div>
-      <label for="state-output"><span>Current state JSON</span></label>
-      <textarea id="state-output" class="state-output" readonly spellcheck="false" placeholder="Click Export state JSON to capture the current form values."></textarea>
-      <div class="toolbar" style="margin-top: 16px;">
-        <label for="logs-output"><span>Generation logs</span></label>
-        <button type="button" id="copy-logs" class="secondary">Copy logs</button>
-      </div>
-      <textarea id="logs-output" class="logs" readonly spellcheck="false" placeholder="Actions and errors will appear here."></textarea>
-      <div id="diagnostic-status" class="success" aria-live="polite"></div>
-    </section>
+    </details>
 
     <p class="footer-note">The generated CSV destination paths are container paths, such as <code>/exports/bank-one</code>. Mount the corresponding host directory into both the connector and Firefly Data Importer containers.</p>
   </main>
@@ -481,7 +489,6 @@
             <label><span>Amount sign</span><select data-amount-sign><option${(values.amountSign || "inflow_positive") === "inflow_positive" ? " selected" : ""}>inflow_positive</option><option${values.amountSign === "outflow_positive" ? " selected" : ""}>outflow_positive</option><option${values.amountSign === "absolute" ? " selected" : ""}>absolute</option></select></label>
             <label><span>Line ending</span><select data-line-ending><option${(values.lineEnding || "crlf") === "crlf" ? " selected" : ""}>crlf</option><option${values.lineEnding === "lf" ? " selected" : ""}>lf</option></select></label>
             <label style="padding-top: 29px;"><input data-include-header type="checkbox"${values.includeHeader === false ? "" : " checked"} style="width: auto; margin-right: 7px;">Include CSV header</label>
-            <label class="grid-wide"><span>Exported Data Importer JSON</span><textarea data-importer-config class="profile-config" spellcheck="false" placeholder='Paste the exported importer configuration JSON here, for example: {"importer":"bank"}'>${escapeHtml(values.importerConfig)}</textarea></label>
           </div>
           <div class="account-list">
             <table class="columns-table">
@@ -489,7 +496,11 @@
               <tbody></tbody>
             </table>
           </div>
-          <button type="button" class="secondary small add-column" style="margin-top: 12px;">Add CSV column</button>`;
+          <button type="button" class="secondary small add-column" style="margin-top: 12px;">Add CSV column</button>
+          <div class="help-callout" title="Download the mock CSV after defining the headers, import it into Firefly Data Importer, then export the resulting profile JSON for the field below.">
+            <strong>Next step:</strong> Download the mock CSV, give it to Firefly Data Importer to render the profile, then paste the exported profile JSON below.
+          </div>
+          <label><span>Exported Data Importer JSON</span><textarea data-importer-config class="profile-config" spellcheck="false" placeholder='Paste the exported importer configuration JSON here, for example: {"importer":"bank"}'>${escapeHtml(values.importerConfig)}</textarea></label>`;
         profileList.appendChild(card);
         card.dataset.csvExtras = JSON.stringify(values.csvExtras || {});
         card.dataset.profileExtras = JSON.stringify(values.profileExtras || {});
