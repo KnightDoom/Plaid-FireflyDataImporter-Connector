@@ -127,16 +127,19 @@
     <section class="section">
       <div class="section-title">
         <div>
-          <h2>Load existing JSON</h2>
-          <p class="help">Paste raw JSON, a generated <code>NAME=...</code> line, or the complete generated .env block. Loaded values replace the matching editor sections.</p>
+          <h2>Load existing configuration</h2>
+          <p class="help">Paste your complete ENV block below. Supported JSON variables are loaded; other variables are ignored. Loaded values replace the matching editor sections.</p>
         </div>
         <button type="button" id="load-existing">Load JSON</button>
       </div>
+      <label><span>ENV block</span><textarea id="existing-env" spellcheck="false" placeholder="Paste your .env block here"></textarea></label>
+      <details><summary>Load individual JSON values</summary>
       <div class="grid">
         <label class="grid-wide"><span>PLAID_ITEMS_JSON</span><textarea data-existing-json="PLAID_ITEMS_JSON" spellcheck="false" placeholder='{"items":[...]}'></textarea></label>
         <label class="grid-wide"><span>IMPORTER_DESTINATIONS_JSON</span><textarea data-existing-json="IMPORTER_DESTINATIONS_JSON" spellcheck="false" placeholder='{"bank-one":"/exports/bank-one"}'></textarea></label>
         <label class="grid-wide"><span>IMPORTER_PROFILES_JSON</span><textarea data-existing-json="IMPORTER_PROFILES_JSON" spellcheck="false" placeholder='{"bank-one-chequing":{"importer_config":{},"csv":{...}}}'></textarea></label>
       </div>
+      </details>
       <div id="load-status" class="success" aria-live="polite"></div>
     </section>
 
@@ -348,6 +351,7 @@
         return {
           schema_version: 1,
           exported_at: new Date().toISOString(),
+          existing_env_input: document.getElementById("existing-env").value,
           existing_json_inputs: Object.fromEntries(Array.from(document.querySelectorAll("[data-existing-json]")).map((field) => [field.dataset.existingJson, field.value])),
           banks: Array.from(document.querySelectorAll(".bank-card")).map((card) => ({
             key: card.querySelector("[data-bank-key]").value,
@@ -626,15 +630,33 @@
         return profiles;
       }
 
-      function parseExistingJson(name) {
+      function extractEnvValues(source) {
+        const values = {};
+        const supported = new Set(["PLAID_ITEMS_JSON", "IMPORTER_DESTINATIONS_JSON", "IMPORTER_PROFILES_JSON"]);
+        const assignments = Array.from(source.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*/gm));
+        assignments.forEach((match, index) => {
+          if (!supported.has(match[1])) return;
+          let value = source.slice(match.index + match[0].length, assignments[index + 1]?.index ?? source.length).trim();
+          value = value.replace(/\r?\n[ \t]*#[^\n]*/g, "").trim();
+          if (value.startsWith("'") || value.startsWith('"')) {
+            const quote = value[0];
+            const end = value.lastIndexOf(quote);
+            if (end > 0 && /^(?:\s*#.*)?$/.test(value.slice(end + 1))) {
+              const quoted = value.slice(0, end + 1);
+              value = quote === "'" ? quoted.slice(1, -1) : JSON.parse(quoted);
+            }
+          }
+          values[match[1]] = value;
+        });
+        return values;
+      }
+
+      function parseExistingJson(name, envValues = {}) {
         const field = document.querySelector(`[data-existing-json="${name}"]`);
-        let source = field.value.trim();
-        if (!source) return null;
-        if (source.startsWith(`${name}=`)) source = source.slice(name.length + 1).trim();
-        else {
-          const envLine = source.split(/\r?\n/).map((line) => line.trim()).find((line) => line.startsWith(`${name}=`));
-          if (envLine) source = envLine.slice(name.length + 1).trim();
-        }
+        let source = Object.prototype.hasOwnProperty.call(envValues, name) ? envValues[name] : field.value.trim();
+        if (!source && !Object.prototype.hasOwnProperty.call(envValues, name)) return null;
+        const values = extractEnvValues(source);
+        if (Object.prototype.hasOwnProperty.call(values, name)) source = values[name];
         try { return JSON.parse(source); }
         catch (error) { throw new Error(`${name}: pasted value is not valid JSON.`); }
       }
@@ -646,11 +668,12 @@
         diagnosticStatus.textContent = "";
         addLog("INFO", "Loading existing JSON values.");
         try {
-          const existingItems = parseExistingJson("PLAID_ITEMS_JSON");
-          const existingDestinations = parseExistingJson("IMPORTER_DESTINATIONS_JSON");
-          const existingProfiles = parseExistingJson("IMPORTER_PROFILES_JSON");
+          const envValues = extractEnvValues(document.getElementById("existing-env").value);
+          const existingItems = parseExistingJson("PLAID_ITEMS_JSON", envValues);
+          const existingDestinations = parseExistingJson("IMPORTER_DESTINATIONS_JSON", envValues);
+          const existingProfiles = parseExistingJson("IMPORTER_PROFILES_JSON", envValues);
           if (existingItems === null && existingDestinations === null && existingProfiles === null) {
-            throw new Error("Paste at least one JSON value before loading.");
+            throw new Error("Paste an ENV block containing a supported JSON variable or an individual JSON value before loading.");
           }
 
           if (existingItems !== null) {

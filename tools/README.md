@@ -16,7 +16,9 @@ The tool keeps entered values in the current browser tab. It does not send them 
 
 ## Load existing configuration
 
-The **Load existing JSON** section accepts any of these formats:
+Paste your complete `.env` block into **ENV block**, then click **Load JSON**. The tool extracts `PLAID_ITEMS_JSON`, `IMPORTER_DESTINATIONS_JSON`, and `IMPORTER_PROFILES_JSON` and ignores other variables. Block values take precedence over individual fields.
+
+Under **Load individual JSON values**, the tool also accepts:
 
 - Raw JSON, such as `{"bank-one":"/exports/bank-one"}`.
 - A generated environment line, such as `IMPORTER_DESTINATIONS_JSON={...}`.
