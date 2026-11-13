@@ -16,7 +16,7 @@ The tool keeps entered values in the current browser tab. It does not send them 
 
 ## Load existing configuration
 
-Paste your complete `.env` block into **ENV block**, then click **Load JSON**. The tool extracts `PLAID_ITEMS_JSON`, `IMPORTER_DESTINATIONS_JSON`, and `IMPORTER_PROFILES_JSON` and ignores other variables. Block values take precedence over individual fields.
+Paste your complete `.env` block into **ENV block**, then click **Load JSON**. The tool extracts the runtime settings and JSON mappings used by the connector. Block values take precedence over individual fields.
 
 Under **Load individual JSON values**, the tool also accepts:
 
@@ -116,9 +116,42 @@ If generation fails:
 The tool generates these environment variables:
 
 ```text
+PLAID_ENV=...
+PLAID_CLIENT_ID=...
+PLAID_SECRET=...
 PLAID_ITEMS_JSON=...
+FIREFLY_URL=...
+FIREFLY_TOKEN=...
+MODE=...
+DRY_RUN=...
+LOG_LEVEL=...
 IMPORTER_DESTINATIONS_JSON=...
 IMPORTER_PROFILES_JSON=...
+# IMPORT_START_DATE=... (when set)
 ```
+
+## Load Firefly accounts
+
+Enter `FIREFLY_URL` and `FIREFLY_TOKEN` in **Runtime settings**, then click
+**Load Firefly accounts**. The tool requests the Firefly asset accounts and
+shows each account's ID, name, and currency in the account selector. Selecting
+an account fills its Firefly account ID and currency code. The Firefly instance
+must allow browser requests from the page's origin; otherwise the browser's
+CORS policy will block the lookup.
+
+## Load Plaid accounts
+
+Enter `PLAID_ENV`, `PLAID_CLIENT_ID`, and `PLAID_SECRET` in **Runtime
+settings**, then start the local proxy from the repository root:
+
+```powershell
+python tools/account_lookup_proxy.py
+```
+
+Enter or load a bank's Plaid access token and click **Load Plaid accounts** on
+that bank card. The browser sends the credentials to the localhost proxy; the
+proxy sends the request to Plaid over HTTPS and returns only account metadata.
+The tool shows each Plaid account ID, name, and currency. Selecting an account
+fills the Plaid account ID and currency code. Keep the page and proxy private.
 
 For the runtime and Compose volume setup, see the repository [README](../README.md) and the configuration comments in [`../.env.example`](../.env.example).

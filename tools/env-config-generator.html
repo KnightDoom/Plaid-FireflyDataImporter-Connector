@@ -93,6 +93,28 @@
     td input { min-width: 110px; }
     .columns-table { min-width: 660px; }
     .columns-table td:last-child, .accounts-table td:last-child { width: 1%; white-space: nowrap; }
+    .account-name { margin-top: 4px; color: var(--muted); font-size: .82rem; font-weight: 400; }
+    .account-lookup-status { min-height: 1.5em; margin: -6px 0 8px; }
+    .toast {
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      z-index: 10;
+      max-width: min(420px, calc(100vw - 36px));
+      padding: 12px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 8px 24px rgb(23 33 43 / 18%);
+      font-weight: 700;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-8px);
+      transition: opacity .15s ease, transform .15s ease;
+    }
+    .toast.visible { opacity: 1; transform: translateY(0); }
+    .toast.success { color: var(--success); border-color: #9bc8ad; }
+    .toast.error { color: var(--danger); border-color: #e1aaaa; }
     .profile-config { min-height: 170px; }
     .error-list { color: var(--danger); margin: 0 0 14px; padding-left: 22px; }
     .success { color: var(--success); font-weight: 700; min-height: 1.5em; }
@@ -118,17 +140,55 @@
 </head>
 <body>
   <main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <div class="intro">
       <h1>Plaid → Firefly .env generator</h1>
       <p>Build the JSON values used by <code>.env</code> for this connector. This is a standalone page: save it locally or open it directly from the repository with <code>file://</code>. It does not contact Plaid, Firefly, or any other server.</p>
-      <div class="notice"><p><strong>Keep this page private.</strong> Access tokens and account mappings are sensitive. The page keeps values in your browser tab and only produces text when you click Generate.</p></div>
+      <div class="notice"><p><strong>Keep this page private.</strong> Plaid and Firefly credentials, account mappings, and tokens are sensitive. Account lookup sends them directly from your browser to the selected service, so only use this page on a trusted machine.</p></div>
     </div>
+
+    <section class="section" id="runtime-settings">
+      <div class="section-title">
+        <div>
+          <h2>Runtime settings</h2>
+          <p class="help">These values become the non-JSON settings in the generated <code>.env</code> block. Start <code>python tools/account_lookup_proxy.py</code> before loading Plaid accounts.</p>
+        </div>
+        <button type="button" id="load-firefly-accounts" class="secondary">Load Firefly accounts</button>
+      </div>
+      <div class="grid">
+        <label><span>PLAID_ENV</span><select data-runtime="PLAID_ENV">
+          <option value="sandbox" selected>sandbox</option>
+          <option value="development">development</option>
+          <option value="production">production</option>
+        </select></label>
+        <label><span>MODE</span><select data-runtime="MODE">
+          <option value="direct" selected>direct</option>
+          <option value="importer">importer</option>
+        </select></label>
+        <label><span>PLAID_CLIENT_ID</span><input data-runtime="PLAID_CLIENT_ID" autocomplete="off" placeholder="Your Plaid client ID"></label>
+        <label><span>PLAID_SECRET</span><input data-runtime="PLAID_SECRET" type="password" autocomplete="off" placeholder="Your Plaid secret"></label>
+        <label><span>FIREFLY_URL</span><input data-runtime="FIREFLY_URL" type="url" placeholder="http://host.docker.internal:8080"></label>
+        <label><span>FIREFLY_TOKEN</span><input data-runtime="FIREFLY_TOKEN" type="password" autocomplete="off" placeholder="Your Firefly token"></label>
+        <label><span>DRY_RUN</span><select data-runtime="DRY_RUN">
+          <option value="true" selected>true</option>
+          <option value="false">false</option>
+        </select></label>
+        <label><span>LOG_LEVEL</span><select data-runtime="LOG_LEVEL">
+          <option value="DEBUG">DEBUG</option>
+          <option value="INFO" selected>INFO</option>
+          <option value="WARNING">WARNING</option>
+          <option value="ERROR">ERROR</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select></label>
+        <label><span>IMPORT_START_DATE <em>(optional)</em></span><input data-runtime="IMPORT_START_DATE" type="date"></label>
+      </div>
+    </section>
 
     <section class="section">
       <div class="section-title">
         <div>
           <h2>Load existing configuration</h2>
-          <p class="help">Paste your complete ENV block below. Supported JSON variables are loaded; other variables are ignored. Loaded values replace the matching editor sections.</p>
+          <p class="help">Paste your complete ENV block below. Runtime settings and supported JSON variables are loaded; other variables are ignored. Loaded values replace the matching editor sections.</p>
         </div>
         <button type="button" id="load-existing">Load JSON</button>
       </div>
@@ -226,7 +286,200 @@
       const stateOutput = document.getElementById("state-output");
       const logsOutput = document.getElementById("logs-output");
       const diagnosticStatus = document.getElementById("diagnostic-status");
+      const toast = document.getElementById("toast");
+      const RUNTIME_ENV_NAMES = [
+        "PLAID_ENV", "PLAID_CLIENT_ID", "PLAID_SECRET", "FIREFLY_URL", "FIREFLY_TOKEN",
+        "MODE", "DRY_RUN", "LOG_LEVEL", "IMPORT_START_DATE"
+      ];
+      const JSON_ENV_NAMES = ["PLAID_ITEMS_JSON", "IMPORTER_DESTINATIONS_JSON", "IMPORTER_PROFILES_JSON"];
+      const PLAID_PROXY_URL = "http://127.0.0.1:8765/plaid/accounts";
       const logs = [];
+      let fireflyAccounts = [];
+      const plaidAccountsByBank = new WeakMap();
+      let toastTimer;
+
+      function showToast(type, message) {
+        clearTimeout(toastTimer);
+        toast.className = `toast ${type} visible`;
+        toast.textContent = message;
+        toastTimer = setTimeout(() => {
+          toast.classList.remove("visible");
+        }, 4500);
+      }
+
+      function collectRuntimeSettings() {
+        return Object.fromEntries(RUNTIME_ENV_NAMES.map((name) => [
+          name,
+          document.querySelector(`[data-runtime="${name}"]`).value.trim()
+        ]));
+      }
+
+      function loadRuntimeSettings(envValues) {
+        RUNTIME_ENV_NAMES.forEach((name) => {
+          if (Object.prototype.hasOwnProperty.call(envValues, name)) {
+            document.querySelector(`[data-runtime="${name}"]`).value = envValues[name];
+          }
+        });
+      }
+
+      function serializeEnvValue(value) {
+        const textValue = String(value ?? "");
+        return /^[A-Za-z0-9_./:-]*$/.test(textValue) ? textValue : JSON.stringify(textValue);
+      }
+
+      function fireflyAccountLabel(account) {
+        const name = account.name || "Unnamed account";
+        const currency = account.currency ? ` (${account.currency})` : "";
+        return `${account.id} — ${name}${currency}`;
+      }
+
+      function updateFireflyAccountDetails(row) {
+        const select = row.querySelector("[data-firefly-id]");
+        const account = fireflyAccounts.find((candidate) => candidate.id === select.value);
+        const name = row.querySelector("[data-firefly-account-name]");
+        name.textContent = account ? account.name : "";
+        if (account?.currency) row.querySelector("[data-currency]").value = account.currency;
+      }
+
+      function renderFireflyAccountOptions(row, selectedId = "") {
+        const select = row.querySelector("[data-firefly-id]");
+        const currentId = selectedId || select.value;
+        select.innerHTML = '<option value="">Select Firefly account</option>' +
+          fireflyAccounts.map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(fireflyAccountLabel(account))}</option>`).join("");
+        if (currentId && !fireflyAccounts.some((account) => account.id === currentId)) {
+          select.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(currentId)}">Current account (${escapeHtml(currentId)})</option>`);
+        }
+        select.value = currentId;
+        updateFireflyAccountDetails(row);
+      }
+
+      async function loadFireflyAccounts() {
+        const button = document.getElementById("load-firefly-accounts");
+        const runtime = collectRuntimeSettings();
+        const baseUrl = runtime.FIREFLY_URL.replace(/\/+$/, "");
+        if (!baseUrl || !runtime.FIREFLY_TOKEN) {
+          diagnosticStatus.textContent = "Enter FIREFLY_URL and FIREFLY_TOKEN before loading accounts.";
+          showToast("error", "Firefly account load failed: enter FIREFLY_URL and FIREFLY_TOKEN.");
+          return;
+        }
+        button.disabled = true;
+        diagnosticStatus.textContent = "Loading Firefly asset accounts...";
+        try {
+          const accounts = [];
+          let page = 1;
+          while (true) {
+            const response = await fetch(`${baseUrl}/api/v1/accounts?type=asset&limit=100&page=${page}`, {
+              headers: { Authorization: `Bearer ${runtime.FIREFLY_TOKEN}`, Accept: "application/json" }
+            });
+            if (!response.ok) throw new Error(`Firefly account lookup failed with HTTP ${response.status}.`);
+            const payload = await response.json();
+            const rows = Array.isArray(payload.data) ? payload.data : [];
+            rows.forEach((row) => {
+              const attributes = row.attributes || row;
+              const id = String(row.id ?? attributes.id ?? "").trim();
+              if (!id) return;
+              accounts.push({
+                id,
+                name: String(attributes.name || "").trim(),
+                currency: String(attributes.currency_code || attributes.currency?.code || "").trim().toUpperCase()
+              });
+            });
+            const pagination = payload.meta?.pagination;
+            const totalPages = Number(pagination?.total_pages || page);
+            if (!rows.length || page >= totalPages) break;
+            page += 1;
+          }
+          fireflyAccounts = accounts;
+          document.querySelectorAll(".accounts-table tbody tr").forEach((row) => renderFireflyAccountOptions(row));
+          diagnosticStatus.textContent = `${accounts.length} Firefly asset account${accounts.length === 1 ? "" : "s"} loaded.`;
+          showToast("success", `${accounts.length} Firefly account${accounts.length === 1 ? "" : "s"} loaded.`);
+          addLog("INFO", `Loaded ${accounts.length} Firefly asset accounts.`);
+        } catch (error) {
+          diagnosticStatus.textContent = "Firefly account lookup failed.";
+          showToast("error", "Firefly account load failed.");
+          addLog("ERROR", error.message, error);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      function plaidAccountLabel(account) {
+        const name = account.name || "Unnamed account";
+        const currency = account.currency ? ` (${account.currency})` : "";
+        return `${account.id} — ${name}${currency}`;
+      }
+
+      function updatePlaidAccountDetails(row) {
+        const bankCard = row.closest(".bank-card");
+        const select = row.querySelector("[data-account-id]");
+        const account = (plaidAccountsByBank.get(bankCard) || []).find((candidate) => candidate.id === select.value);
+        const name = row.querySelector("[data-plaid-account-name]");
+        name.textContent = account ? account.name : "";
+        if (account?.currency) row.querySelector("[data-currency]").value = account.currency;
+      }
+
+      function renderPlaidAccountOptions(bankCard, row, selectedId = "") {
+        const select = row.querySelector("[data-account-id]");
+        const currentId = selectedId || select.value;
+        const accounts = plaidAccountsByBank.get(bankCard) || [];
+        select.innerHTML = '<option value="">Select Plaid account</option>' +
+          accounts.map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(plaidAccountLabel(account))}</option>`).join("");
+        if (currentId && !accounts.some((account) => account.id === currentId)) {
+          select.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(currentId)}">Current account (${escapeHtml(currentId)})</option>`);
+        }
+        select.value = currentId;
+        updatePlaidAccountDetails(row);
+      }
+
+      async function loadPlaidAccounts(bankCard) {
+        const runtime = collectRuntimeSettings();
+        const accessToken = text(bankCard, "[data-access-token]");
+        const status = bankCard.querySelector("[data-plaid-status]");
+        const button = bankCard.querySelector(".load-plaid-accounts");
+        if (!runtime.PLAID_CLIENT_ID || !runtime.PLAID_SECRET || !accessToken) {
+          status.textContent = "Enter PLAID_CLIENT_ID, PLAID_SECRET, and this bank's access token first.";
+          showToast("error", "Plaid account load failed: enter the client ID, secret, and access token.");
+          return;
+        }
+        button.disabled = true;
+        status.textContent = "Loading Plaid accounts...";
+        try {
+          const response = await fetch(PLAID_PROXY_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({
+              environment: runtime.PLAID_ENV,
+              client_id: runtime.PLAID_CLIENT_ID,
+              secret: runtime.PLAID_SECRET,
+              access_token: accessToken
+            })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const detail = payload.error || payload.display_message || payload.error_message || payload.error_code || `HTTP ${response.status}`;
+            throw new Error(`Plaid account lookup failed: ${detail}.`);
+          }
+          const accounts = Array.isArray(payload.accounts) ? payload.accounts.map((account) => ({
+            id: String(account.account_id || "").trim(),
+            name: String(account.name || account.official_name || "").trim(),
+            currency: String(account.balances?.iso_currency_code || account.balances?.unofficial_currency_code || "").trim().toUpperCase()
+          })).filter((account) => account.id) : [];
+          plaidAccountsByBank.set(bankCard, accounts);
+          bankCard.querySelectorAll(".accounts-table tbody tr").forEach((row) => renderPlaidAccountOptions(bankCard, row));
+          status.textContent = `${accounts.length} Plaid account${accounts.length === 1 ? "" : "s"} loaded.`;
+          showToast("success", `${accounts.length} Plaid account${accounts.length === 1 ? "" : "s"} loaded.`);
+          addLog("INFO", `Loaded ${accounts.length} Plaid accounts for ${text(bankCard, "[data-bank-key]")}.`);
+        } catch (error) {
+          const message = error instanceof TypeError
+            ? "Plaid proxy is not running. Start: python tools/account_lookup_proxy.py"
+            : error.message;
+          status.textContent = message;
+          showToast("error", message);
+          addLog("ERROR", message, error);
+        } finally {
+          button.disabled = false;
+        }
+      }
 
       function addLog(level, message, error) {
         const timestamp = new Date().toISOString();
@@ -351,6 +604,7 @@
         return {
           schema_version: 1,
           exported_at: new Date().toISOString(),
+          runtime_settings: collectRuntimeSettings(),
           existing_env_input: document.getElementById("existing-env").value,
           existing_json_inputs: Object.fromEntries(Array.from(document.querySelectorAll("[data-existing-json]")).map((field) => [field.dataset.existingJson, field.value])),
           banks: Array.from(document.querySelectorAll(".bank-card")).map((card) => ({
@@ -360,7 +614,9 @@
             ignored_account_ids: card.querySelector("[data-ignored]").value,
             accounts: Array.from(card.querySelectorAll("tbody tr")).map((row) => ({
               plaid_account_id: row.querySelector("[data-account-id]").value,
+              plaid_account_name: row.querySelector("[data-plaid-account-name]").textContent,
               firefly_account_id: row.querySelector("[data-firefly-id]").value,
+              firefly_account_name: row.querySelector("[data-firefly-account-name]").textContent,
               currency: row.querySelector("[data-currency]").value,
               importer_profile: row.querySelector("[data-profile-select]").value
             }))
@@ -422,8 +678,12 @@
         card.innerHTML = `
           <div class="card-title">
             <h3>Bank connection</h3>
-            <button type="button" class="danger small remove-bank">Remove bank</button>
+            <div class="button-row">
+              <button type="button" class="secondary small load-plaid-accounts">Load Plaid accounts</button>
+              <button type="button" class="danger small remove-bank">Remove bank</button>
+            </div>
           </div>
+          <div class="help account-lookup-status" data-plaid-status aria-live="polite"></div>
           <div class="grid">
             <label><span>Bank key</span><input data-bank-key placeholder="bank-one" value="${escapeHtml(values.key)}"></label>
             <label><span>Plaid access token</span><input data-access-token type="password" autocomplete="off" placeholder="access-sandbox-..." value="${escapeHtml(values.accessToken)}"></label>
@@ -432,7 +692,7 @@
           </div>
           <div class="account-list">
             <table class="accounts-table">
-              <thead><tr><th>Plaid account ID</th><th>Firefly account ID</th><th>Currency</th><th>Importer profile</th><th></th></tr></thead>
+              <thead><tr><th>Plaid account</th><th>Firefly account</th><th>Currency</th><th>Importer profile</th><th></th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -444,11 +704,13 @@
       function addAccount(bankCard, values = {}) {
         const row = document.createElement("tr");
         row.innerHTML = `
-          <td><input data-account-id placeholder="plaid-account-id" value="${escapeHtml(values.id)}"></td>
-          <td><input data-firefly-id type="number" min="1" step="1" placeholder="1" value="${escapeHtml(values.fireflyId)}"></td>
+          <td><select data-account-id aria-label="Plaid account"></select><div class="account-name" data-plaid-account-name></div></td>
+          <td><select data-firefly-id aria-label="Firefly account"></select><div class="account-name" data-firefly-account-name></div></td>
           <td><input data-currency maxlength="3" placeholder="CAD" value="${escapeHtml(values.currency)}"></td>
           <td><select data-profile-select aria-label="Importer profile"><option value="">No importer profile</option></select></td>
           <td><button type="button" class="danger small remove-account">Remove</button></td>`;
+        renderPlaidAccountOptions(bankCard, row, values.id ? String(values.id) : "");
+        renderFireflyAccountOptions(row, values.fireflyId ? String(values.fireflyId) : "");
         row.querySelector("[data-profile-select]").dataset.pendingProfile = values.profile || "";
         bankCard.querySelector("tbody").appendChild(row);
         refreshProfileOptions();
@@ -459,11 +721,18 @@
           .map((input) => input.value.trim())
           .filter(Boolean);
         document.querySelectorAll("[data-profile-select]").forEach((select) => {
-          const selected = select.dataset.pendingProfile ?? select.value;
+          const pending = select.dataset.pendingProfile;
+          const selected = pending ?? select.value;
           select.innerHTML = '<option value="">No importer profile</option>' +
             names.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
-          if (names.includes(selected)) select.value = selected;
-          select.dataset.pendingProfile = select.value;
+          if (names.includes(selected)) {
+            select.value = selected;
+            select.dataset.pendingProfile = selected;
+          } else if (pending) {
+            select.dataset.pendingProfile = pending;
+          } else {
+            select.dataset.pendingProfile = select.value;
+          }
         });
       }
 
@@ -632,7 +901,7 @@
 
       function extractEnvValues(source) {
         const values = {};
-        const supported = new Set(["PLAID_ITEMS_JSON", "IMPORTER_DESTINATIONS_JSON", "IMPORTER_PROFILES_JSON"]);
+        const supported = new Set([...RUNTIME_ENV_NAMES, ...JSON_ENV_NAMES]);
         const assignments = Array.from(source.matchAll(/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*/gm));
         assignments.forEach((match, index) => {
           if (!supported.has(match[1])) return;
@@ -669,19 +938,20 @@
         addLog("INFO", "Loading existing JSON values.");
         try {
           const envValues = extractEnvValues(document.getElementById("existing-env").value);
+          loadRuntimeSettings(envValues);
           const existingItems = parseExistingJson("PLAID_ITEMS_JSON", envValues);
           const existingDestinations = parseExistingJson("IMPORTER_DESTINATIONS_JSON", envValues);
           const existingProfiles = parseExistingJson("IMPORTER_PROFILES_JSON", envValues);
-          if (existingItems === null && existingDestinations === null && existingProfiles === null) {
-            throw new Error("Paste an ENV block containing a supported JSON variable or an individual JSON value before loading.");
+          const hasRuntimeValues = RUNTIME_ENV_NAMES.some((name) => Object.prototype.hasOwnProperty.call(envValues, name));
+          if (existingItems === null && existingDestinations === null && existingProfiles === null && !hasRuntimeValues) {
+            throw new Error("Paste an ENV block containing a supported variable or an individual JSON value before loading.");
           }
 
           if (existingItems !== null) {
-            if (!existingItems || !Array.isArray(existingItems.items)) {
-              throw new Error("PLAID_ITEMS_JSON must contain an items array.");
-            }
+            const items = Array.isArray(existingItems) ? existingItems : existingItems?.items;
+            if (!Array.isArray(items)) throw new Error("PLAID_ITEMS_JSON must be an items array.");
             bankList.innerHTML = "";
-            existingItems.items.forEach((item) => {
+            items.forEach((item) => {
               const accounts = Object.entries(item.accounts || {}).map(([id, account]) => ({
                 id,
                 fireflyId: account.firefly_account_id,
@@ -737,8 +1007,9 @@
               });
             });
           }
-          loadStatus.textContent = "Existing JSON loaded. Review the fields, then generate the updated .env block.";
-          addLog("INFO", "Existing JSON values loaded into the form.");
+          loadStatus.textContent = "Existing configuration loaded. Review the fields, then generate the updated .env block.";
+          showToast("success", "Configuration loaded successfully.");
+          addLog("INFO", "Existing configuration values loaded into the form.");
         } catch (error) {
           const list = document.createElement("ul");
           list.className = "error-list";
@@ -746,6 +1017,7 @@
           item.textContent = error.message;
           list.appendChild(item);
           errors.appendChild(list);
+          showToast("error", `Load failed: ${error.message}`);
           addLog("ERROR", error.message, error);
         }
       }
@@ -758,13 +1030,24 @@
         try {
           const banks = collectBanks();
           const profiles = collectProfiles();
+          const runtime = collectRuntimeSettings();
           const outputLines = [
-            `PLAID_ITEMS_JSON=${JSON.stringify(banks.items)}`,
+            `PLAID_ENV=${serializeEnvValue(runtime.PLAID_ENV)}`,
+            `PLAID_CLIENT_ID=${serializeEnvValue(runtime.PLAID_CLIENT_ID)}`,
+            `PLAID_SECRET=${serializeEnvValue(runtime.PLAID_SECRET)}`,
+            `PLAID_ITEMS_JSON=${JSON.stringify({ items: banks.items })}`,
+            `FIREFLY_URL=${serializeEnvValue(runtime.FIREFLY_URL)}`,
+            `FIREFLY_TOKEN=${serializeEnvValue(runtime.FIREFLY_TOKEN)}`,
+            `MODE=${serializeEnvValue(runtime.MODE)}`,
+            `DRY_RUN=${serializeEnvValue(runtime.DRY_RUN)}`,
+            `LOG_LEVEL=${serializeEnvValue(runtime.LOG_LEVEL)}`,
             `IMPORTER_DESTINATIONS_JSON=${JSON.stringify(banks.destinations)}`,
             `IMPORTER_PROFILES_JSON=${JSON.stringify(profiles)}`
           ];
+          if (runtime.IMPORT_START_DATE) outputLines.push(`IMPORT_START_DATE=${serializeEnvValue(runtime.IMPORT_START_DATE)}`);
           output.value = outputLines.join("\n");
           status.textContent = "Generated successfully. Review the values before saving .env.";
+          showToast("success", "ENV configuration generated successfully.");
           addLog("INFO", "Generation completed successfully.");
         } catch (error) {
           output.value = "";
@@ -774,6 +1057,7 @@
           item.textContent = error.message;
           list.appendChild(item);
           errors.appendChild(list);
+          showToast("error", `Generation failed: ${error.message}`);
           addLog("ERROR", error.message, error);
         }
       }
@@ -804,12 +1088,19 @@
         const target = event.target;
         const card = target.closest(".bank-card");
         if (target.closest(".remove-bank")) card.remove();
+        if (target.closest(".load-plaid-accounts")) loadPlaidAccounts(card);
         if (target.closest(".add-account")) addAccount(card);
         if (target.closest(".remove-account")) target.closest("tr").remove();
       });
       bankList.addEventListener("change", (event) => {
+        if (event.target.matches("[data-account-id]")) {
+          updatePlaidAccountDetails(event.target.closest("tr"));
+        }
         if (event.target.matches("[data-profile-select]")) {
           event.target.dataset.pendingProfile = event.target.value;
+        }
+        if (event.target.matches("[data-firefly-id]")) {
+          updateFireflyAccountDetails(event.target.closest("tr"));
         }
       });
       profileList.addEventListener("click", (event) => {
@@ -836,6 +1127,7 @@
       });
       document.getElementById("add-bank").addEventListener("click", () => addBank());
       document.getElementById("add-profile").addEventListener("click", () => addProfile());
+      document.getElementById("load-firefly-accounts").addEventListener("click", loadFireflyAccounts);
       document.getElementById("load-existing").addEventListener("click", loadExisting);
       document.getElementById("generate").addEventListener("click", generate);
       document.getElementById("copy").addEventListener("click", copyOutput);
